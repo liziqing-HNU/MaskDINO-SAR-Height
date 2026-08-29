@@ -4,17 +4,21 @@ _BASE_: ../../coco/instance-segmentation/maskdino_R50_bs16_50ep_3s_dowsample1_20
 # All machine-dependent paths are collected here. Change only this block when
 # moving the project to a server; YAML aliases propagate the values below.
 # Environment variables SP6_DATASET_ROOT and SP6_ANNOTATION_FILE can override
-# the first two entries at runtime.
+# the first two entries at runtime. No pretrained-weight path exists because
+# every optical and SAR module is initialized from scratch.
 # ---------------------------------------------------------------------------
 PATHS:
   DATASET_ROOT: &dataset_root "/run/media/lzq/LZQ/sp/SpaceNet6_Expanded/PS-RGB/sar_rgb_dataset_1m_256up512"
   ANNOTATION_FILE: &annotation_file "/run/media/lzq/LZQ/sp/SpaceNet6_Expanded/PS-RGB/sar_rgb_dataset_1m_256up512/building_height_coco_repaired.json"
-  MASKDINO_WEIGHTS: &maskdino_weights "/home/lzq/Project/MaskDINO/output/sp6_building_R50_bs2_height/model_0077279.pth"
-  SAR_RESNET18_WEIGHTS: &sar_resnet18_weights "https://download.pytorch.org/models/resnet18-f37072fd.pth"
-  OUTPUT_DIR: &output_dir "/home/lzq/Project/MaskDINO/output/sp6_sar_height_R50_bs16_50ep"
+  OUTPUT_DIR: &output_dir "/home/lzq/Project/MaskDINO/output/sp6_sar_height_R50_scratch_bs2_acc8_100ep"
 
 MODEL:
-  WEIGHTS: *maskdino_weights
+  # Deliberately empty: do not load COCO, ImageNet, old SP6, or resume weights.
+  WEIGHTS: ""
+  RESNETS:
+    # FrozenBN assumes meaningful pretrained statistics. GroupNorm is stable
+    # for the small physical batch used by true from-scratch training.
+    NORM: "GN"
   SEM_SEG_HEAD:
     NUM_CLASSES: 1
   MaskDINO:
@@ -22,8 +26,8 @@ MODEL:
     # Legacy optical-only height prediction stays disabled. The SAR branch
     # independently enables final matched-query height supervision.
     HEIGHT_ON: False
-    DEEP_SUPERVISION: False
-    DN: "no"
+    DEEP_SUPERVISION: True
+    DN: "seg"
     TEST:
       SEMANTIC_ON: False
       INSTANCE_ON: True
@@ -32,16 +36,17 @@ MODEL:
       HEIGHT_IOU_THRESHOLD: 0.5
 
   MASKDINO:
-    FREEZE: True
-    DETACH_REFERENCE: True
+    FREEZE: False
+    DETACH_REFERENCE: False
 
   SAR:
     ENABLED: True
     PHASE_DESCRIPTOR: True
     AMP_ENABLED: True
     AMP_GATE_ENABLED: True
-    RESNET18_WEIGHTS: *sar_resnet18_weights
-    FREEZE_BATCH_NORM: True
+    # The SAR ResNet18 is also randomly initialized.
+    RESNET18_WEIGHTS: ""
+    FREEZE_BATCH_NORM: False
     # Statistics from normalization_stats.json in DATASET_ROOT.
     INTENSITY_CLIP: [-18.224987697601318, 5.063441348075877]
     INTENSITY_MEAN: -12.176343665977567
@@ -104,20 +109,27 @@ DATALOADER:
   NUM_WORKERS: 4
 
 SOLVER:
-  # Global batch size. With 3,465 training images this is about 217
-  # iterations per epoch; the schedule below therefore remains about 50 epochs.
-  IMS_PER_BATCH: 16
+  # A physical batch of 2 is safe for full MaskDINO+SAR backprop on the local
+  # 12 GB GPU. Eight AMP micro-batches form an effective global batch of 16.
+  IMS_PER_BATCH: 2
+  GRAD_ACCUMULATION_STEPS: 8
   BASE_LR: 0.0001
-  MAX_ITER: 10875
-  STEPS: (9788, 10331)
+  BACKBONE_MULTIPLIER: 1.0
+  # One iteration is one optimizer update over 16 images. 21,657 updates are
+  # approximately 100 epochs over the deterministic 3,465-image train split.
+  MAX_ITER: 21657
+  STEPS: (19491, 20574)
   WARMUP_FACTOR: 0.001
   WARMUP_ITERS: 63
-  CHECKPOINT_PERIOD: 544
+  CHECKPOINT_PERIOD: 1083
   AMP:
     ENABLED: True
+    # The default 65536 overflows on the first randomly initialized optical
+    # backward pass. GradScaler will grow this automatically when it is safe.
+    INIT_SCALE: 16.0
 
 TEST:
-  EVAL_PERIOD: 544
+  EVAL_PERIOD: 1083
   DETECTIONS_PER_IMAGE: 300
 
 OUTPUT_DIR: *output_dir

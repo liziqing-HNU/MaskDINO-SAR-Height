@@ -29,7 +29,7 @@ OpenCV 对该数据的前三个 band 读取顺序是反向的，因此配置中�
 打开主配置：
 
 ```text
-configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
+configs/sp6/instance-segmentation/maskdino_R50_scratch_bs2_acc8_100ep_height.yaml
 ```
 
 文件顶部的 `PATHS` 是所有需要随机器调整的位置：
@@ -38,8 +38,6 @@ configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
 PATHS:
   DATASET_ROOT: ...
   ANNOTATION_FILE: ...
-  MASKDINO_WEIGHTS: ...
-  SAR_RESNET18_WEIGHTS: ...
   OUTPUT_DIR: ...
 ```
 
@@ -50,7 +48,7 @@ export SP6_DATASET_ROOT=/server/path/sar_rgb_dataset_1m_256up512
 export SP6_ANNOTATION_FILE=/server/path/sar_rgb_dataset_1m_256up512/building_height_coco_repaired.json
 ```
 
-`MASKDINO_WEIGHTS` 当前指向本机已有的 SP6 光学模型 `model_0077279.pth`，checkpoint 不纳入 Git。迁移服务器时需要一并复制该文件并修改上述路径。`SAR_RESNET18_WEIGHTS` 默认使用 PyTorch 官方 URL；如果服务器不能联网，先下载 `resnet18-f37072fd.pth`，再把该项改成本地绝对路径。
+主配置明确设置 `MODEL.WEIGHTS: ""` 和 `MODEL.SAR.RESNET18_WEIGHTS: ""`，不读取 COCO、ImageNet、旧 SP6 或其他预训权重。新建训练时不要加 `--resume`；只有从本次 scratch 训练自己产生的 checkpoint 续训时才使用 `--resume`。
 
 ## 数据和模块验收
 
@@ -72,7 +70,7 @@ python tools/validate_sp6_sar_height_dataset.py --samples 16
 python -m unittest -v tests.test_sar_height
 ```
 
-预期为 8 项测试全部 `OK`。其中合成平移测试明确要求 SAR 向右移动 8 个原始像素时预测 `dx` 为正；另有独立测试确认关闭 SAR 后 optical class、box 和 mask 与启用前逐元素一致。
+预期为 10 项测试全部 `OK`。其中配置测试会阻止误用预训权重或再次冻结 MaskDINO，AMP 累积测试会确认两个微批次只执行一次 optimizer step；另有测试确认偏移符号以及关闭 SAR 后 optical class、box 和 mask 的逐元素一致性。
 
 ## 小样本过拟合检查
 
@@ -86,19 +84,19 @@ python train_net.py \
 
 该配置用于确认高度损失可以下降，以及梯度能传递到 Height Head、Geometry Decoder、Deformable Attention、SAR FPN、ResNet18、Phase Stem 和 Amplitude Stem；不要把它用于正式结果。
 
-本机已完成 500 iteration 验收：前 5 个日志点的高度损失中位数为 `0.7234`，后 5 个为 `0.0685`，下降约 `90.5%`。测试 checkpoint 和日志均位于被 Git 忽略的 `output/sp6_sar_height_overfit/`。
+该配置同样不加载任何预训权重，但为了快速诊断使用物理 batch 1、不做梯度累积。日志和 checkpoint 位于被 Git 忽略的 `output/sp6_sar_height_scratch_overfit/`。
 
 ## 正式训练
 
-主配置使用单卡全局 batch size 16。训练集为 3,465 张，因此 `MAX_ITER=10875` 约等于 50 epochs；增减 batch size 时应按比例同步调整 `MAX_ITER`、`STEPS`、`WARMUP_ITERS`、`CHECKPOINT_PERIOD` 和 `TEST.EVAL_PERIOD`。本机 RTX 5070 已用真实数据完成 batch 8/16 训练反传测试；batch 16 随机 batch 峰值保留显存约 6.98GB，包含 1,425 个建筑实例的最密集 16 图压力测试峰值约 7.13GB。
+主配置从随机权重联合训练光学 MaskDINO 与 SAR 分支。本机 12GB RTX 5070 使用物理 batch 2，峰值保留显存约 5.31GB；每 8 个 AMP 微批次更新一次参数，有效 batch 为 16。训练集为 3,465 张，`MAX_ITER=21657` 按 optimizer update 计数，约等于 100 epochs。
 
 ```bash
 python train_net.py \
   --num-gpus 1 \
-  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
+  --config-file configs/sp6/instance-segmentation/maskdino_R50_scratch_bs2_acc8_100ep_height.yaml
 ```
 
-默认冻结 MaskDINO，只训练 SAR Encoder、Matching Projection、全局/局部相关模块、Geometry Decoder 和 Height Head。训练损失为匹配正样本的 Smooth L1 高度损失，加上已知 synthetic shift 的全局偏移损失。Matcher cost 仍只包含 class、box 和 mask，不含高度。
+MaskDINO Backbone、Pixel Decoder、Transformer Decoder 与 SAR Encoder、对齐模块、Geometry Decoder、Height Head 全部参与反向传播。光学分支使用 class/box/mask、deep supervision 和 segmentation denoising 损失；SAR 分支使用匹配正样本高度损失和 synthetic global-offset 损失。Matcher cost 仍只包含 class、box 和 mask，不含高度。
 
 断点续训：
 
@@ -106,7 +104,7 @@ python train_net.py \
 python train_net.py \
   --resume \
   --num-gpus 1 \
-  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
+  --config-file configs/sp6/instance-segmentation/maskdino_R50_scratch_bs2_acc8_100ep_height.yaml
 ```
 
 ## 验证与推理
@@ -115,7 +113,7 @@ python train_net.py \
 python train_net.py \
   --eval-only \
   --num-gpus 1 \
-  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml \
+  --config-file configs/sp6/instance-segmentation/maskdino_R50_scratch_bs2_acc8_100ep_height.yaml \
   MODEL.WEIGHTS /path/to/model_final.pth
 ```
 
@@ -143,6 +141,18 @@ MODEL.ALIGN.GLOBAL_ENABLED=False      -> global offset 为 0
 MODEL.ALIGN.LOCAL_CORR_ENABLED=False  -> local offset 为 0
 二者均关闭                              -> SAR reference box 与 optical reference box 完全相同
 MODEL.SAR.ENABLED=False               -> 不创建/执行 SAR 分支，原 class/box/mask 路径保持不变
+```
+
+scratch 主配置还要保持以下约束：
+
+```text
+MODEL.WEIGHTS=""                       -> MaskDINO 不加载任何权重
+MODEL.SAR.RESNET18_WEIGHTS=""          -> SAR ResNet18 不加载 ImageNet 权重
+MODEL.MASKDINO.FREEZE=False            -> 联合训练 MaskDINO
+MODEL.MASKDINO.DETACH_REFERENCE=False  -> 高度梯度可回传至光学 query/reference
+MODEL.RESNETS.NORM="GN"                -> 随机光学 ResNet 使用 GroupNorm
+SOLVER.GRAD_ACCUMULATION_STEPS=8       -> 物理 batch 2，有效 batch 16
+SOLVER.AMP.INIT_SCALE=16               -> 避免随机 MaskDINO 首次 FP16 反传溢出
 ```
 
 完整结构与非目标以仓库根目录的开发需求文档为准。

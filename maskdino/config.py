@@ -42,8 +42,6 @@ def add_maskdino_config(cfg):
     cfg.PATHS = CN()
     cfg.PATHS.DATASET_ROOT = ""
     cfg.PATHS.ANNOTATION_FILE = ""
-    cfg.PATHS.MASKDINO_WEIGHTS = ""
-    cfg.PATHS.SAR_RESNET18_WEIGHTS = ""
     cfg.PATHS.OUTPUT_DIR = ""
 
     # solver config
@@ -77,8 +75,8 @@ def add_maskdino_config(cfg):
     # MaskDINO -> SAR geometry interface. Upper-case MASKDINO is deliberately
     # separate from the legacy MaskDINO decoder configuration above.
     cfg.MODEL.MASKDINO = CN()
-    cfg.MODEL.MASKDINO.FREEZE = True
-    cfg.MODEL.MASKDINO.DETACH_REFERENCE = True
+    cfg.MODEL.MASKDINO.FREEZE = False
+    cfg.MODEL.MASKDINO.DETACH_REFERENCE = False
 
     # Four-channel SAR encoder and matching projections.
     cfg.MODEL.SAR = CN()
@@ -87,7 +85,7 @@ def add_maskdino_config(cfg):
     cfg.MODEL.SAR.AMP_ENABLED = True
     cfg.MODEL.SAR.AMP_GATE_ENABLED = True
     cfg.MODEL.SAR.RESNET18_WEIGHTS = ""
-    cfg.MODEL.SAR.FREEZE_BATCH_NORM = True
+    cfg.MODEL.SAR.FREEZE_BATCH_NORM = False
     cfg.MODEL.SAR.INTENSITY_CLIP = [-18.224987697601318, 5.063441348075877]
     cfg.MODEL.SAR.INTENSITY_MEAN = -12.176343665977567
     cfg.MODEL.SAR.INTENSITY_STD = 4.21532613169376
@@ -127,6 +125,13 @@ def add_maskdino_config(cfg):
     cfg.MODEL.HEIGHT.LOSS_BETA = 1.0
     cfg.MODEL.HEIGHT.SCALE = 1.0
     cfg.MODEL.HEIGHT.DROPOUT = 0.1
+
+    # Number of micro-batches used for one optimizer update. One keeps the
+    # stock Detectron2 trainer; values above one use AMP gradient accumulation.
+    cfg.SOLVER.GRAD_ACCUMULATION_STEPS = 1
+    # PyTorch's default is 65536. Scratch MaskDINO can override it with a
+    # smaller value to keep the first backward pass in float16 range.
+    cfg.SOLVER.AMP.INIT_SCALE = 65536.0
 
     # cost weight
     cfg.MODEL.MaskDINO.COST_CLASS_WEIGHT = 4.0

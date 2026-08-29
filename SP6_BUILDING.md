@@ -2,8 +2,8 @@
 
 原有的光学-only 高度回归说明已由完整的 SAR 弱对齐 Baseline 取代。
 
-请阅读 [SP6_SAR_HEIGHT.md](SP6_SAR_HEIGHT.md)。主配置已按实际的全局 batch size 16 命名：
+请阅读 [SP6_SAR_HEIGHT.md](SP6_SAR_HEIGHT.md)。主配置从随机权重联合训练 MaskDINO 与 SAR 分支：
 
 ```text
-configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
+configs/sp6/instance-segmentation/maskdino_R50_scratch_bs2_acc8_100ep_height.yaml
 ```

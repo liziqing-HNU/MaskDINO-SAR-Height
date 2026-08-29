@@ -6,6 +6,7 @@ from torch import nn
 from detectron2.config import get_cfg
 from detectron2.modeling import build_model
 from detectron2.projects.deeplab import add_deeplab_config
+from detectron2.utils.events import EventStorage
 
 from maskdino import add_maskdino_config
 from maskdino.maskdino import MaskDINO
@@ -20,9 +21,34 @@ from maskdino.sar_height.maskdino_sar_height import MaskDINOSARHeightBranch
 from maskdino.sar_height.phase_descriptor import PhaseDescriptorGenerator
 from maskdino.sar_height.sar_resnet_fpn import SARResNet18FPN
 from maskdino.sar_height.sar_stem import SARLightweightStem
+from train_net import AMPGradientAccumulationTrainer
 
 
 class SARHeightModuleTests(unittest.TestCase):
+    def test_scratch_config_trains_all_modules_without_pretrained_weights(self):
+        cfg = get_cfg()
+        add_deeplab_config(cfg)
+        add_maskdino_config(cfg)
+        cfg.merge_from_file(
+            "configs/sp6/instance-segmentation/"
+            "maskdino_R50_scratch_bs2_acc8_100ep_height.yaml"
+        )
+
+        self.assertEqual(cfg.MODEL.WEIGHTS, "")
+        self.assertEqual(cfg.MODEL.SAR.RESNET18_WEIGHTS, "")
+        self.assertEqual(cfg.MODEL.BACKBONE.FREEZE_AT, 0)
+        self.assertFalse(cfg.MODEL.MASKDINO.FREEZE)
+        self.assertFalse(cfg.MODEL.MASKDINO.DETACH_REFERENCE)
+        self.assertFalse(cfg.MODEL.SAR.FREEZE_BATCH_NORM)
+        self.assertEqual(cfg.MODEL.RESNETS.NORM, "GN")
+        self.assertTrue(cfg.MODEL.MaskDINO.DEEP_SUPERVISION)
+        self.assertEqual(cfg.MODEL.MaskDINO.DN, "seg")
+        self.assertTrue(cfg.SOLVER.AMP.ENABLED)
+        self.assertEqual(cfg.SOLVER.AMP.INIT_SCALE, 16.0)
+        self.assertEqual(cfg.SOLVER.IMS_PER_BATCH, 2)
+        self.assertEqual(cfg.SOLVER.GRAD_ACCUMULATION_STEPS, 8)
+        self.assertEqual(cfg.SOLVER.BACKBONE_MULTIPLIER, 1.0)
+
     def test_phase_descriptor_shape_and_no_circular_boundary(self):
         sin_phi = torch.zeros(1, 1, 9, 9)
         cos_phi = torch.ones_like(sin_phi)
@@ -205,7 +231,7 @@ class SARHeightModuleTests(unittest.TestCase):
         add_maskdino_config(cfg)
         cfg.merge_from_file(
             "configs/sp6/instance-segmentation/"
-            "maskdino_R50_bs16_50ep_height.yaml"
+            "maskdino_R50_scratch_bs2_acc8_100ep_height.yaml"
         )
         cfg.defrost()
         cfg.MODEL.WEIGHTS = ""
@@ -244,6 +270,55 @@ class SARHeightModuleTests(unittest.TestCase):
         self.assertTrue(
             torch.equal(enabled.pred_boxes.tensor, disabled.pred_boxes.tensor)
         )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA AMP accumulation test")
+    def test_amp_gradient_accumulation_uses_one_optimizer_step(self):
+        class ToyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 1)
+                self.forward_calls = 0
+
+            def forward(self, batch):
+                self.forward_calls += 1
+                prediction = self.linear(batch["x"])
+                return {"loss_toy": (prediction - batch["y"]).square().mean()}
+
+        class CountingSGD(torch.optim.SGD):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.step_calls = 0
+
+            def step(self, *args, **kwargs):
+                self.step_calls += 1
+                return super().step(*args, **kwargs)
+
+        torch.manual_seed(19)
+        model = ToyModel().cuda()
+        initial_weight = model.linear.weight.detach().clone()
+        optimizer = CountingSGD(model.parameters(), lr=0.1)
+        data_loader = [
+            {
+                "x": torch.tensor([[1.0, 2.0]], device="cuda"),
+                "y": torch.tensor([[0.5]], device="cuda"),
+            },
+            {
+                "x": torch.tensor([[-1.0, 1.0]], device="cuda"),
+                "y": torch.tensor([[-0.25]], device="cuda"),
+            },
+        ]
+        trainer = AMPGradientAccumulationTrainer(
+            model, data_loader, optimizer, accumulation_steps=2
+        )
+
+        with EventStorage(0):
+            trainer.iter = 0
+            trainer.run_step()
+
+        self.assertEqual(model.forward_calls, 2)
+        self.assertEqual(optimizer.step_calls, 1)
+        self.assertTrue(torch.isfinite(model.linear.weight).all())
+        self.assertFalse(torch.equal(initial_weight, model.linear.weight.detach()))
 
 
 if __name__ == "__main__":

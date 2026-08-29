@@ -17,8 +17,10 @@ import copy
 import itertools
 import logging
 import os
+import time
 
 from collections import OrderedDict
+from contextlib import nullcontext
 from typing import Any, Dict, List, Set
 
 import torch
@@ -45,6 +47,7 @@ from detectron2.evaluation import (
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
 from detectron2.utils.logger import setup_logger
+from detectron2.utils.events import get_event_storage
 
 # MaskDINO
 from maskdino import (
@@ -72,6 +75,74 @@ from detectron2.engine import (
 import weakref
 
 
+class AMPGradientAccumulationTrainer(AMPTrainer):
+    """Run several AMP micro-batches before one optimizer/scheduler step."""
+
+    def __init__(self, *args, accumulation_steps=1, **kwargs):
+        accumulation_steps = int(accumulation_steps)
+        if accumulation_steps < 2:
+            raise ValueError("accumulation_steps must be at least 2")
+        super().__init__(*args, **kwargs)
+        self.accumulation_steps = accumulation_steps
+
+    def run_step(self):
+        assert self.model.training, "[AMPGradientAccumulationTrainer] model is not training"
+        assert torch.cuda.is_available(), "AMP gradient accumulation requires CUDA"
+
+        self.optimizer.zero_grad()
+        averaged_losses = {}
+        total_data_time = 0.0
+
+        for micro_step in range(self.accumulation_steps):
+            started = time.perf_counter()
+            data = next(self._data_loader_iter)
+            total_data_time += time.perf_counter() - started
+
+            # Avoid redundant gradient synchronization for all but the final
+            # micro-batch when this trainer is used with DistributedDataParallel.
+            sync_context = (
+                self.model.no_sync()
+                if micro_step + 1 < self.accumulation_steps
+                and hasattr(self.model, "no_sync")
+                else nullcontext()
+            )
+            with sync_context:
+                with torch.amp.autocast(
+                    device_type="cuda", dtype=self.precision
+                ):
+                    loss_dict = self.model(data)
+                    if isinstance(loss_dict, torch.Tensor):
+                        losses = loss_dict
+                        loss_dict = {"total_loss": loss_dict}
+                    else:
+                        losses = sum(loss_dict.values())
+                    scaled_losses = losses / self.accumulation_steps
+                self.grad_scaler.scale(scaled_losses).backward()
+
+            for name, value in loss_dict.items():
+                contribution = value.detach() / self.accumulation_steps
+                averaged_losses[name] = averaged_losses.get(name, 0.0) + contribution
+
+        if self.log_grad_scaler:
+            get_event_storage().put_scalar(
+                "[metric]grad_scaler", self.grad_scaler.get_scale()
+            )
+
+        self.after_backward()
+        if self.async_write_metrics:
+            self.concurrent_executor.submit(
+                self._write_metrics,
+                averaged_losses,
+                total_data_time,
+                iter=self.iter,
+            )
+        else:
+            self._write_metrics(averaged_losses, total_data_time)
+
+        self.grad_scaler.step(self.optimizer)
+        self.grad_scaler.update()
+
+
 class Trainer(DefaultTrainer):
     """
     Extension of the Trainer class adapted to MaskFormer.
@@ -89,9 +160,37 @@ class Trainer(DefaultTrainer):
         data_loader = self.build_train_loader(cfg)
 
         model = create_ddp_model(model, broadcast_buffers=False)
-        self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else SimpleTrainer)(
-            model, data_loader, optimizer
-        )
+        accumulation_steps = int(cfg.SOLVER.GRAD_ACCUMULATION_STEPS)
+        amp_grad_scaler = None
+        if cfg.SOLVER.AMP.ENABLED:
+            amp_init_scale = float(cfg.SOLVER.AMP.INIT_SCALE)
+            if amp_init_scale <= 0:
+                raise ValueError("SOLVER.AMP.INIT_SCALE must be positive")
+            amp_grad_scaler = torch.amp.GradScaler(
+                "cuda", init_scale=amp_init_scale
+            )
+        if accumulation_steps > 1:
+            if not cfg.SOLVER.AMP.ENABLED:
+                raise ValueError(
+                    "SOLVER.GRAD_ACCUMULATION_STEPS > 1 currently requires AMP"
+                )
+            self._trainer = AMPGradientAccumulationTrainer(
+                model,
+                data_loader,
+                optimizer,
+                accumulation_steps=accumulation_steps,
+                grad_scaler=amp_grad_scaler,
+            )
+        else:
+            if cfg.SOLVER.AMP.ENABLED:
+                self._trainer = AMPTrainer(
+                    model,
+                    data_loader,
+                    optimizer,
+                    grad_scaler=amp_grad_scaler,
+                )
+            else:
+                self._trainer = SimpleTrainer(model, data_loader, optimizer)
 
         self.scheduler = self.build_lr_scheduler(cfg, optimizer)
 
