@@ -1,0 +1,121 @@
+_BASE_: ../../coco/instance-segmentation/maskdino_R50_bs16_50ep_3s_dowsample1_2048.yaml
+
+# ---------------------------------------------------------------------------
+# All machine-dependent paths are collected here. Change only this block when
+# moving the project to a server; YAML aliases propagate the values below.
+# Environment variables SP6_DATASET_ROOT and SP6_ANNOTATION_FILE can override
+# the first two entries at runtime.
+# ---------------------------------------------------------------------------
+PATHS:
+  DATASET_ROOT: &dataset_root "/run/media/lzq/LZQ/sp/SpaceNet6_Expanded/PS-RGB/sar_rgb_dataset_1m_256up512"
+  ANNOTATION_FILE: &annotation_file "/run/media/lzq/LZQ/sp/SpaceNet6_Expanded/PS-RGB/sar_rgb_dataset_1m_256up512/building_height_coco_repaired.json"
+  MASKDINO_WEIGHTS: &maskdino_weights "/home/lzq/Project/MaskDINO/output/sp6_building_R50_bs2_height/model_0077279.pth"
+  SAR_RESNET18_WEIGHTS: &sar_resnet18_weights "https://download.pytorch.org/models/resnet18-f37072fd.pth"
+  OUTPUT_DIR: &output_dir "/home/lzq/Project/MaskDINO/output/sp6_sar_height_R50_bs1_50ep"
+
+MODEL:
+  WEIGHTS: *maskdino_weights
+  SEM_SEG_HEAD:
+    NUM_CLASSES: 1
+  MaskDINO:
+    NUM_OBJECT_QUERIES: 300
+    # Legacy optical-only height prediction stays disabled. The SAR branch
+    # independently enables final matched-query height supervision.
+    HEIGHT_ON: False
+    DEEP_SUPERVISION: False
+    DN: "no"
+    TEST:
+      SEMANTIC_ON: False
+      INSTANCE_ON: True
+      PANOPTIC_ON: False
+      HEIGHT_SCORE_THRESHOLD: 0.5
+      HEIGHT_IOU_THRESHOLD: 0.5
+
+  MASKDINO:
+    FREEZE: True
+    DETACH_REFERENCE: True
+
+  SAR:
+    ENABLED: True
+    PHASE_DESCRIPTOR: True
+    AMP_ENABLED: True
+    AMP_GATE_ENABLED: True
+    RESNET18_WEIGHTS: *sar_resnet18_weights
+    FREEZE_BATCH_NORM: True
+    # Statistics from normalization_stats.json in DATASET_ROOT.
+    INTENSITY_CLIP: [-18.224987697601318, 5.063441348075877]
+    INTENSITY_MEAN: -12.176343665977567
+    INTENSITY_STD: 4.21532613169376
+    COHERENCE_CLIP: [0.0, 1.0]
+    MATCH_DIM: 64
+
+  ALIGN:
+    GLOBAL_ENABLED: True
+    LOCAL_CORR_ENABLED: True
+    MATCHING_STRIDE: 8
+    GLOBAL_SEARCH_RADIUS: 8
+    LOCAL_SEARCH_RADIUS: 4
+    GLOBAL_TEMPERATURE: 0.1
+    LOCAL_TEMPERATURE: 0.1
+    SYNTHETIC_SHIFT_SUPERVISION: True
+    SYNTHETIC_SHIFT_PROBABILITY: 1.0
+    SYNTHETIC_SHIFT_MAX_PIXELS: 32
+    GLOBAL_LOSS_WEIGHT: 1.0
+
+  GEOMETRY_DECODER:
+    NUM_LAYERS: 3
+    USE_SELF_ATTN: False
+    D_MODEL: 256
+    NHEADS: 8
+    N_LEVELS: 4
+    N_POINTS: 4
+    DIM_FEEDFORWARD: 1024
+    DROPOUT: 0.1
+
+  HEIGHT:
+    ACTIVATION: "softplus"
+    LOSS_WEIGHT: 1.0
+    LOSS_BETA: 1.0
+    SCALE: 1.0
+    DROPOUT: 0.1
+
+DATASETS:
+  SP6_ROOT: *dataset_root
+  SP6_ANNOTATION_FILE: *annotation_file
+  SP6_SPLIT_RATIOS: [0.8, 0.1, 0.1]
+  SP6_SPLIT_SEED: 20260829
+  SP6_MAX_TRAIN_IMAGES: 0
+  TRAIN: ("sp6_building_train",)
+  TEST: ("sp6_building_val",)
+
+INPUT:
+  FORMAT: "RGB"
+  DATASET_MAPPER_NAME: "coco_instance_lsj"
+  IMAGE_SIZE: 512
+  MIN_SCALE: 1.0
+  MAX_SCALE: 1.0
+  MIN_SIZE_TEST: 512
+  MAX_SIZE_TEST: 512
+  RANDOM_FLIP: "horizontal"
+  SAR_CHANNEL_ORDER: [2, 1, 0, 3]
+
+DATALOADER:
+  FILTER_EMPTY_ANNOTATIONS: False
+  NUM_WORKERS: 4
+
+SOLVER:
+  IMS_PER_BATCH: 1
+  BASE_LR: 0.0001
+  MAX_ITER: 174000
+  STEPS: (156600, 165300)
+  WARMUP_FACTOR: 0.001
+  WARMUP_ITERS: 1000
+  CHECKPOINT_PERIOD: 8700
+  AMP:
+    ENABLED: True
+
+TEST:
+  EVAL_PERIOD: 8700
+  DETECTIONS_PER_IMAGE: 300
+
+OUTPUT_DIR: *output_dir

@@ -1,0 +1,53 @@
+_BASE_: ../../coco/instance-segmentation/maskdino_R50_bs16_50ep_3s_dowsample1_2048.yaml
+
+MODEL:
+  # Warm-start from the best SP6 building checkpoint. The BONAI model keeps
+  # building-bbox/roof-mask prediction; height-head weights are unused.
+  WEIGHTS: "output/sp6_building_R50_bs2_height/model_0038639.pth"
+  SEM_SEG_HEAD:
+    NUM_CLASSES: 1
+  MaskDINO:
+    NUM_OBJECT_QUERIES: 300
+    HEIGHT_ON: False
+    TEST:
+      SEMANTIC_ON: False
+      INSTANCE_ON: True
+      PANOPTIC_ON: False
+
+DATASETS:
+  TRAIN: ("bonai_roof_train",)
+  TEST: ("bonai_roof_val",)
+
+INPUT:
+  FORMAT: "RGB"
+  DATASET_MAPPER_NAME: "coco_instance_lsj"
+  # building_bbox is intentionally broader than the roof-mask bounds.
+  RECOMPUTE_BOXES_FROM_MASKS: False
+  IMAGE_SIZE: 512
+  MIN_SCALE: 0.5
+  MAX_SCALE: 2.0
+  MIN_SIZE_TEST: 512
+  MAX_SIZE_TEST: 512
+  RANDOM_FLIP: "horizontal"
+
+DATALOADER:
+  FILTER_EMPTY_ANNOTATIONS: True
+  NUM_WORKERS: 4
+
+SOLVER:
+  IMS_PER_BATCH: 2
+  BASE_LR: 0.00002
+  # 3000 images / batch 2 = 1500 iterations per epoch.
+  MAX_ITER: 75000
+  STEPS: (67500, 72000)
+  WARMUP_FACTOR: 0.001
+  WARMUP_ITERS: 500
+  CHECKPOINT_PERIOD: 7500
+  AMP:
+    ENABLED: True
+
+TEST:
+  EVAL_PERIOD: 7500
+  DETECTIONS_PER_IMAGE: 300
+
+OUTPUT_DIR: "output/bonai_building_bbox_roof_mask_preserve_bbox_R50_bs2_50ep_512"
