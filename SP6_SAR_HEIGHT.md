@@ -88,7 +88,7 @@ python train_net.py \
 
 ## 正式训练
 
-主配置从随机权重联合训练光学 MaskDINO 与 SAR 分支。本机 12GB RTX 5070 使用物理 batch 2，峰值保留显存约 5.31GB；每 8 个 AMP 微批次更新一次参数，有效 batch 为 16。训练集为 3,465 张，`MAX_ITER=21657` 按 optimizer update 计数，约等于 100 epochs。
+主配置从随机权重联合训练光学 MaskDINO 与 SAR 分支。本机 12GB RTX 5070 使用物理 batch 2，完整 optimizer update 的峰值保留显存约 5.38GB；每 8 个 AMP 微批次更新一次参数，有效 batch 为 16。训练集为 3,465 张，`MAX_ITER=21657` 按 optimizer update 计数，约等于 100 epochs。
 
 ```bash
 python train_net.py \
