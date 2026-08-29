@@ -38,7 +38,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config-file",
-        default="configs/sp6/instance-segmentation/maskdino_R50_bs2_50ep_height.yaml",
+        default="configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml",
     )
     parser.add_argument("--samples", type=int, default=16)
     parser.add_argument(

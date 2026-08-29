@@ -11,7 +11,7 @@ PATHS:
   ANNOTATION_FILE: &annotation_file "/run/media/lzq/LZQ/sp/SpaceNet6_Expanded/PS-RGB/sar_rgb_dataset_1m_256up512/building_height_coco_repaired.json"
   MASKDINO_WEIGHTS: &maskdino_weights "/home/lzq/Project/MaskDINO/output/sp6_building_R50_bs2_height/model_0077279.pth"
   SAR_RESNET18_WEIGHTS: &sar_resnet18_weights "https://download.pytorch.org/models/resnet18-f37072fd.pth"
-  OUTPUT_DIR: &output_dir "/home/lzq/Project/MaskDINO/output/sp6_sar_height_R50_bs1_50ep"
+  OUTPUT_DIR: &output_dir "/home/lzq/Project/MaskDINO/output/sp6_sar_height_R50_bs16_50ep"
 
 MODEL:
   WEIGHTS: *maskdino_weights
@@ -104,18 +104,20 @@ DATALOADER:
   NUM_WORKERS: 4
 
 SOLVER:
-  IMS_PER_BATCH: 1
+  # Global batch size. With 3,465 training images this is about 217
+  # iterations per epoch; the schedule below therefore remains about 50 epochs.
+  IMS_PER_BATCH: 16
   BASE_LR: 0.0001
-  MAX_ITER: 174000
-  STEPS: (156600, 165300)
+  MAX_ITER: 10875
+  STEPS: (9788, 10331)
   WARMUP_FACTOR: 0.001
-  WARMUP_ITERS: 1000
-  CHECKPOINT_PERIOD: 8700
+  WARMUP_ITERS: 63
+  CHECKPOINT_PERIOD: 544
   AMP:
     ENABLED: True
 
 TEST:
-  EVAL_PERIOD: 8700
+  EVAL_PERIOD: 544
   DETECTIONS_PER_IMAGE: 300
 
 OUTPUT_DIR: *output_dir

@@ -205,7 +205,7 @@ class SARHeightModuleTests(unittest.TestCase):
         add_maskdino_config(cfg)
         cfg.merge_from_file(
             "configs/sp6/instance-segmentation/"
-            "maskdino_R50_bs2_50ep_height.yaml"
+            "maskdino_R50_bs16_50ep_height.yaml"
         )
         cfg.defrost()
         cfg.MODEL.WEIGHTS = ""

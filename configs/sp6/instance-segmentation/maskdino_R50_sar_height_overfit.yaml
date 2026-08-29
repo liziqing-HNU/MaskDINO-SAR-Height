@@ -1,4 +1,4 @@
-_BASE_: maskdino_R50_bs2_50ep_height.yaml
+_BASE_: maskdino_R50_bs16_50ep_height.yaml
 
 # Two-image diagnostic run used to verify end-to-end height gradients and
 # deliberate overfitting before launching the full server job.

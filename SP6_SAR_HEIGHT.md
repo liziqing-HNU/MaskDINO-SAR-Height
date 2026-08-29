@@ -29,7 +29,7 @@ OpenCV 对该数据的前三个 band 读取顺序是反向的，因此配置中�
 打开主配置：
 
 ```text
-configs/sp6/instance-segmentation/maskdino_R50_bs2_50ep_height.yaml
+configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
 ```
 
 文件顶部的 `PATHS` 是所有需要随机器调整的位置：
@@ -90,10 +90,12 @@ python train_net.py \
 
 ## 正式训练
 
+主配置使用单卡全局 batch size 16。训练集为 3,465 张，因此 `MAX_ITER=10875` 约等于 50 epochs；增减 batch size 时应按比例同步调整 `MAX_ITER`、`STEPS`、`WARMUP_ITERS`、`CHECKPOINT_PERIOD` 和 `TEST.EVAL_PERIOD`。本机 RTX 5070 已用真实数据完成 batch 8/16 训练反传测试；batch 16 随机 batch 峰值保留显存约 6.98GB，包含 1,425 个建筑实例的最密集 16 图压力测试峰值约 7.13GB。
+
 ```bash
 python train_net.py \
   --num-gpus 1 \
-  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs2_50ep_height.yaml
+  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
 ```
 
 默认冻结 MaskDINO，只训练 SAR Encoder、Matching Projection、全局/局部相关模块、Geometry Decoder 和 Height Head。训练损失为匹配正样本的 Smooth L1 高度损失，加上已知 synthetic shift 的全局偏移损失。Matcher cost 仍只包含 class、box 和 mask，不含高度。
@@ -104,7 +106,7 @@ python train_net.py \
 python train_net.py \
   --resume \
   --num-gpus 1 \
-  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs2_50ep_height.yaml
+  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml
 ```
 
 ## 验证与推理
@@ -113,7 +115,7 @@ python train_net.py \
 python train_net.py \
   --eval-only \
   --num-gpus 1 \
-  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs2_50ep_height.yaml \
+  --config-file configs/sp6/instance-segmentation/maskdino_R50_bs16_50ep_height.yaml \
   MODEL.WEIGHTS /path/to/model_final.pth
 ```
 
