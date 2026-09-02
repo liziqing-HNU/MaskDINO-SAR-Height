@@ -1,7 +1,6 @@
 Mask DINO <img src="figures/dinosaur.png" width="30">
 ========
 
-> 本仓库在原 MaskDINO 基础上实现了 **SAR 弱对齐建筑实例高度预测 Baseline**。本机/服务器路径配置、数据校验、单元测试、训练和推理方法见 [SP6_SAR_HEIGHT.md](SP6_SAR_HEIGHT.md)，完整设计约束见仓库根目录的开发需求文档。
 
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/mask-dino-towards-a-unified-transformer-based-1/panoptic-segmentation-on-coco-minival)](https://paperswithcode.com/sota/panoptic-segmentation-on-coco-minival?p=mask-dino-towards-a-unified-transformer-based-1)
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/mask-dino-towards-a-unified-transformer-based-1/panoptic-segmentation-on-coco-test-dev)](https://paperswithcode.com/sota/panoptic-segmentation-on-coco-test-dev?p=mask-dino-towards-a-unified-transformer-based-1)
